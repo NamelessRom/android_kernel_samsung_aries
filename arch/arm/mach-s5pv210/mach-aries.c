@@ -31,12 +31,14 @@
 #include <linux/irq.h>
 #include <linux/skbuff.h>
 #include <linux/console.h>
+#ifdef CONFIG_ION_S5P
+#include <../../../drivers/staging/android/ion/ion.h>
+#endif
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/setup.h>
 #include <asm/mach-types.h>
-#include <asm/system.h>
 
 #include <mach/map.h>
 #include <mach/regs-clock.h>
@@ -49,7 +51,7 @@
 #ifdef CONFIG_SAMSUNG_FASCINATE
 #include <mach/regs-gpio.h>
 #endif
-
+#include <mach/voltages.h>
 #include <linux/usb/gadget.h>
 #include <linux/fsa9480.h>
 #include <linux/pn544.h>
@@ -57,10 +59,6 @@
 #include <linux/reboot.h>
 #include <linux/wlan_plat.h>
 #include <linux/mfd/wm8994/wm8994_pdata.h>
-
-#ifdef CONFIG_ANDROID_PMEM
-#include <linux/android_pmem.h>
-#endif
 
 #include <plat/media.h>
 #include <mach/media.h>
@@ -75,6 +73,7 @@
 #include <media/s5ka3dfx_platform.h>
 #endif
 
+#include <plat/system-reset.h>
 #include <plat/regs-serial.h>
 #include <plat/s5pv210.h>
 #include <plat/devs.h>
@@ -321,11 +320,11 @@ static struct s3cfb_lcd s6e63m0 = {
 						 (CONFIG_FB_S3C_NUM_OVLY_WIN * \
 						  CONFIG_FB_S3C_NUM_BUF_OVLY_WIN)))
 #define  S5PV210_VIDEO_SAMSUNG_MEMSIZE_JPEG (916 * SZ_1K)
-#define  S5PV210_ANDROID_PMEM_MEMSIZE_PMEM (5550 * SZ_1K)
-#define  S5PV210_ANDROID_PMEM_MEMSIZE_PMEM_GPU1 (3000 * SZ_1K)
-#define  S5PV210_ANDROID_PMEM_MEMSIZE_PMEM_ADSP (1500 * SZ_1K)
-#define  S5PV210_VIDEO_SAMSUNG_MEMSIZE_TEXTSTREAM (3000 * SZ_1K)
-
+#define  S5P_MAX_VIDEO_BUFFERS	8
+#define  S5P_VIDEO_Y_SIZE	ALIGN(1280 * 720, PAGE_SIZE)
+#define  S5P_VIDEO_UV_SIZE	ALIGN(1280 * 360, PAGE_SIZE)
+#define  S5P_ION_CARVEOUT	\
+	S5P_MAX_VIDEO_BUFFERS * (S5P_VIDEO_Y_SIZE + S5P_VIDEO_UV_SIZE)
 
 static struct s5p_media_device aries_media_devs[] = {
 	[0] = {
@@ -349,92 +348,76 @@ static struct s5p_media_device aries_media_devs[] = {
 		.memsize = S5PV210_VIDEO_SAMSUNG_MEMSIZE_FIMC0,
 		.paddr = 0,
 	},
-/*	[3] = {
-		.id = S5P_MDEV_FIMC1,
-		.name = "fimc1",
-		.bank = 1,
-		.memsize = S5PV210_VIDEO_SAMSUNG_MEMSIZE_FIMC1,
-		.paddr = 0,
-	},*/
-	[4] = {
+	[3] = {
 		.id = S5P_MDEV_FIMC2,
 		.name = "fimc2",
 		.bank = 1,
 		.memsize = S5PV210_VIDEO_SAMSUNG_MEMSIZE_FIMC2,
 		.paddr = 0,
 	},
-	[5] = {
+	[4] = {
 		.id = S5P_MDEV_JPEG,
 		.name = "jpeg",
 		.bank = 0,
 		.memsize = S5PV210_VIDEO_SAMSUNG_MEMSIZE_JPEG,
 		.paddr = 0,
 	},
-	[6] = {
+	[5] = {
 		.id = S5P_MDEV_FIMD,
 		.name = "fimd",
 		.bank = 1,
 		.memsize = S5PV210_VIDEO_SAMSUNG_MEMSIZE_FIMD,
 		.paddr = 0,
 	},
-#ifdef CONFIG_ANDROID_PMEM
-	[7] = {
-		.id = S5P_MDEV_PMEM,
-		.name = "pmem",
-		.bank = 0,
-		.memsize = S5PV210_ANDROID_PMEM_MEMSIZE_PMEM,
-		.paddr = 0,
-	},
-	[8] = {
-		.id = S5P_MDEV_PMEM_GPU1,
-		.name = "pmem_gpu1",
-		.bank = 0,
-		.memsize = S5PV210_ANDROID_PMEM_MEMSIZE_PMEM_GPU1,
-		.paddr = 0,
-	},
-	[9] = {
-		.id = S5P_MDEV_PMEM_ADSP,
-		.name = "pmem_adsp",
-		.bank = 0,
-		.memsize = S5PV210_ANDROID_PMEM_MEMSIZE_PMEM_ADSP,
-		.paddr = 0,
-		},
-	[10] = {
-		.id = S5P_MDEV_TEXSTREAM,
-		.name = "s3c_bc",
+#ifdef CONFIG_ION_S5P
+	[6] = {
+		.id = S5P_MDEV_ION_CARVEOUT,
+		.name = "ion-carveout",
 		.bank = 1,
-		.memsize = S5PV210_VIDEO_SAMSUNG_MEMSIZE_TEXTSTREAM,
+		.memsize = S5P_ION_CARVEOUT,
 		.paddr = 0,
-	},	
+	},
 #endif
 };
 
 #ifdef CONFIG_CPU_FREQ
 static struct s5pv210_cpufreq_voltage smdkc110_cpufreq_volt[] = {
 	{
+		.freq	= 1400000,
+		.varm	= DVSARM0,
+		.vint	= DVSINT0,
+	}, {
+		.freq	= 1300000,
+		.varm	= DVSARM1,
+		.vint	= DVSINT0,
+	}, {
 		.freq	= 1200000,
-		.varm	= 1275000,
-		.vint	= 1100000,
+		.varm	= DVSARM2,
+		.vint	= DVSINT1,
+	}, {
+		.freq	= 1100000,
+		.varm	= DVSARM3,
+		.vint	= DVSINT1,
 	}, {
 		.freq	= 1000000,
-		.varm	= 1275000,
-		.vint	= 1100000,
+		.varm	= DVSARM4,
+		.vint	= DVSINT2,
 	}, {
 		.freq	=  800000,
-		.varm	= 1200000,
-		.vint	= 1100000,
+		.varm	= DVSARM5,
+		.vint	= DVSINT2,
 	}, {
 		.freq	=  400000,
-		.varm	= 1050000,
-		.vint	= 1100000,
+		.varm	= DVSARM6,
+		.vint	= DVSINT2,
 	}, {
 		.freq	=  200000,
-		.varm	=  950000,
-		.vint	= 1100000,
+		.varm	= DVSARM7,
+		.vint	= DVSINT2,
 	}, {
 		.freq	=  100000,
-		.varm	=  950000,
-		.vint	= 1000000,
+		.varm	= DVSARM7,
+		.vint	= DVSINT3,
 	},
 };
 
@@ -718,7 +701,7 @@ static struct regulator_init_data aries_buck1_data = {
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				  REGULATOR_CHANGE_STATUS,
 		.state_mem	= {
-			.uV	= 1250000,
+			.uV	= ARMBOOT,
 			.mode	= REGULATOR_MODE_NORMAL,
 			.disabled = 1,
 		},
@@ -736,7 +719,7 @@ static struct regulator_init_data aries_buck2_data = {
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				  REGULATOR_CHANGE_STATUS,
 		.state_mem	= {
-			.uV	= 1100000,
+			.uV	= INTBOOT,
 			.mode	= REGULATOR_MODE_NORMAL,
 			.disabled = 1,
 		},
@@ -975,18 +958,6 @@ static struct max8998_platform_data max8998_pdata = {
 	.num_regulators = ARRAY_SIZE(aries_regulators),
 	.regulators     = aries_regulators,
 	.charger        = &aries_charger,
-	/* Preloads must be in increasing order of voltage value */
-	.buck1_voltage4	= 950000,
-	.buck1_voltage3	= 1050000,
-	.buck1_voltage2	= 1200000,
-	.buck1_voltage1	= 1275000,
-	.buck2_voltage2	= 1000000,
-	.buck2_voltage1	= 1100000,
-	.buck1_set1	= GPIO_BUCK_1_EN_A,
-	.buck1_set2	= GPIO_BUCK_1_EN_B,
-	.buck2_set3	= GPIO_BUCK_2_EN,
-	.buck1_default_idx = 1,
-	.buck2_default_idx = 0,
 };
 
 struct platform_device sec_device_dpram = {
@@ -1341,11 +1312,11 @@ static const int touch_keypad_code[] = {
 	KEY_MENU,
 	KEY_BACK,
 	/* Unofficial support for the Telus Fascinate - same internals as I9000 */
-	KEY_HOME,
+	KEY_HOMEPAGE,
 	KEY_SEARCH
 #else
 	KEY_MENU,
-	KEY_HOME,
+	KEY_HOMEPAGE,
 	KEY_BACK,
 	KEY_SEARCH
 #endif
@@ -1370,7 +1341,7 @@ static struct gpio_event_direct_entry aries_keypad_key_map[] = {
 #if defined (CONFIG_SAMSUNG_GALAXYS) || defined (CONFIG_SAMSUNG_GALAXYSB)
 	{
 		.gpio	= S5PV210_GPH3(5),
-		.code	= KEY_HOME,
+		.code	= KEY_HOMEPAGE,
 	},
 #endif
 #ifdef CONFIG_SAMSUNG_VIBRANT
@@ -2686,68 +2657,6 @@ static struct platform_device ram_console_device = {
 	.num_resources = ARRAY_SIZE(ram_console_resource),
 	.resource = ram_console_resource,
 };
-
-#ifdef CONFIG_ANDROID_PMEM
-static struct android_pmem_platform_data pmem_pdata = {
-	.name = "pmem",
-	.no_allocator = 1,
-	.cached = 1,
-	.start = 0,
-	.size = 0,
-};
-
-static struct android_pmem_platform_data pmem_gpu1_pdata = {
-	.name = "pmem_gpu1",
-	.no_allocator = 1,
-	.cached = 1,
-	.buffered = 1,
-	.start = 0,
-	.size = 0,
-};
-
-static struct android_pmem_platform_data pmem_adsp_pdata = {
-	.name = "pmem_adsp",
-	.no_allocator = 1,
-	.cached = 1,
-	.buffered = 1,
-	.start = 0,
-	.size = 0,
-};
-
-static struct platform_device pmem_device = {
-	.name = "android_pmem",
-	.id = 0,
-	.dev = { .platform_data = &pmem_pdata },
-};
-
-static struct platform_device pmem_gpu1_device = {
-	.name = "android_pmem",
-	.id = 1,
-	.dev = { .platform_data = &pmem_gpu1_pdata },
-};
-
-static struct platform_device pmem_adsp_device = {
-	.name = "android_pmem",
-	.id = 2,
-	.dev = { .platform_data = &pmem_adsp_pdata },
-};
-
-static void __init android_pmem_set_platdata(void)
-{
-	pmem_pdata.start = (u32)s5p_get_media_memory_bank(S5P_MDEV_PMEM, 0);
-	pmem_pdata.size = (u32)s5p_get_media_memsize_bank(S5P_MDEV_PMEM, 0);
-
-	pmem_gpu1_pdata.start =
-		(u32)s5p_get_media_memory_bank(S5P_MDEV_PMEM_GPU1, 0);
-	pmem_gpu1_pdata.size =
-		(u32)s5p_get_media_memsize_bank(S5P_MDEV_PMEM_GPU1, 0);
-
-	pmem_adsp_pdata.start =
-		(u32)s5p_get_media_memory_bank(S5P_MDEV_PMEM_ADSP, 0);
-	pmem_adsp_pdata.size =
-		(u32)s5p_get_media_memsize_bank(S5P_MDEV_PMEM_ADSP, 0);
-}
-#endif
 
 struct platform_device sec_device_battery = {
 	.name	= "sec-battery",
@@ -5062,6 +4971,40 @@ static struct platform_device watchdog_device = {
 	.id = -1,
 };
 
+#ifdef CONFIG_ION_S5P
+struct ion_platform_heap aries_heaps[] = {
+	{
+		.id	    = ION_HEAP_TYPE_SYSTEM,
+		.type	= ION_HEAP_TYPE_SYSTEM,
+		.name	= "system",
+	},{
+		.id	    = ION_HEAP_TYPE_CARVEOUT,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= "carveout",
+	}
+};
+static struct ion_platform_data ion_s5p_data = {
+	.nr = ARRAY_SIZE(aries_heaps),
+	.heaps = aries_heaps,
+};
+
+static struct platform_device ion_s5p_device = {
+	.name = "ion-s5p",
+	.id = -1,
+	.dev = {
+		.platform_data = &ion_s5p_data,
+	},
+};
+
+static void __init ion_s5p_set_platdata(void)
+{
+	ion_s5p_data.heaps[1].base =
+		s5p_get_media_memory_bank(S5P_MDEV_ION_CARVEOUT, 1);
+	ion_s5p_data.heaps[1].size =
+		s5p_get_media_memsize_bank(S5P_MDEV_ION_CARVEOUT, 1);
+}
+#endif /* CONFIG_ION_S5P */
+
 static struct platform_device *aries_devices[] __initdata = {
 	&watchdog_device,
 #ifdef CONFIG_FIQ_DEBUGGER
@@ -5125,6 +5068,12 @@ static struct platform_device *aries_devices[] __initdata = {
 #if defined (CONFIG_SAMSUNG_CAPTIVATE)
 	&s3c_device_i2c13,
 #endif
+#if defined CONFIG_USB_S3C_OTG_HOST
+	&s3c_device_usb_otghcd,
+#endif
+#if defined CONFIG_USB_DWC_OTG
+	&s3c_device_usb_dwcotg,
+#endif
 #ifdef CONFIG_USB_GADGET
 	&s3c_device_usbgadget,
 #endif
@@ -5169,12 +5118,6 @@ static struct platform_device *aries_devices[] __initdata = {
 	&s5pv210_pd_mfc,
 #endif
 
-#ifdef CONFIG_ANDROID_PMEM
-	&pmem_device,
-	&pmem_gpu1_device,
-	&pmem_adsp_device,
-#endif
-
 #ifdef CONFIG_HAVE_PWM
 	&s3c_device_timer[0],
 	&s3c_device_timer[1],
@@ -5191,6 +5134,10 @@ static struct platform_device *aries_devices[] __initdata = {
 	&ram_console_device,
 	&sec_device_wifi,
 	&samsung_asoc_dma,
+
+#ifdef CONFIG_ION_S5P
+	&ion_s5p_device,
+#endif
 };
 
 static void __init aries_map_io(void)
@@ -5391,6 +5338,11 @@ static void __init aries_inject_cmdline(void) {
 		size += sprintf(new_command_line + size, " bootmode=%d", bootmode);
 	}
 
+	// LPM charging mode
+	if (readl(S5P_INFORM5)) {
+		size += sprintf(new_command_line + size, " androidboot.mode=charger");
+	}
+
 	saved_command_line = new_command_line;
 }
 
@@ -5431,8 +5383,8 @@ static void __init aries_machine_init(void)
 	/*initialise the gpio's*/
 	aries_init_gpio();
 
-#ifdef CONFIG_ANDROID_PMEM
-	android_pmem_set_platdata();
+#ifdef CONFIG_ION_S5P
+	ion_s5p_set_platdata();
 #endif
 
 	/* headset/earjack detection */
@@ -5574,18 +5526,17 @@ void otg_phy_init(void)
 			S3C_USBOTG_PHYCLK);
 	writel((readl(S3C_USBOTG_RSTCON) & ~(0x3<<1)) | (0x1<<0),
 			S3C_USBOTG_RSTCON);
-	msleep(1);
+	mdelay(1);
 	writel(readl(S3C_USBOTG_RSTCON) & ~(0x7<<0),
 			S3C_USBOTG_RSTCON);
-	msleep(1);
+	mdelay(1);
 
 	/* rising/falling time */
 	writel(readl(S3C_USBOTG_PHYTUNE) | (0x1<<20),
 			S3C_USBOTG_PHYTUNE);
 
-	/* set DC level as 6 (6%) */
-	writel((readl(S3C_USBOTG_PHYTUNE) & ~(0xf)) | (0x1<<2) | (0x1<<1),
-			S3C_USBOTG_PHYTUNE);
+	/* set DC level as 0xf (24%) */
+	writel(readl(S3C_USBOTG_PHYTUNE) | 0xf, S3C_USBOTG_PHYTUNE);
 }
 EXPORT_SYMBOL(otg_phy_init);
 
@@ -5634,6 +5585,47 @@ void usb_host_phy_off(void)
 			S5P_USB_PHY_CONTROL);
 }
 EXPORT_SYMBOL(usb_host_phy_off);
+#endif
+
+#if defined CONFIG_USB_S3C_OTG_HOST || defined CONFIG_USB_DWC_OTG
+
+/* Initializes OTG Phy */
+void otg_host_phy_init(void)
+{
+	__raw_writel(__raw_readl(S5P_USB_PHY_CONTROL)
+		|(0x1<<0), S5P_USB_PHY_CONTROL); /*USB PHY0 Enable */
+	// from galaxy tab otg host:
+	__raw_writel((__raw_readl(S3C_USBOTG_PHYPWR)
+		&~(0x3<<3)&~(0x1<<0))|(0x1<<5), S3C_USBOTG_PHYPWR);
+	// from galaxy s2 otg host:
+	//     __raw_writel((__raw_readl(S3C_USBOTG_PHYPWR)
+	//           &~(0x7<<3)&~(0x1<<0)), S3C_USBOTG_PHYPWR);
+	__raw_writel((__raw_readl(S3C_USBOTG_PHYCLK)
+		&~(0x1<<4))|(0x7<<0), S3C_USBOTG_PHYCLK);
+
+	__raw_writel((__raw_readl(S3C_USBOTG_RSTCON)
+		&~(0x3<<1))|(0x1<<0), S3C_USBOTG_RSTCON);
+
+	mdelay(1);
+
+	__raw_writel((__raw_readl(S3C_USBOTG_RSTCON)
+		&~(0x7<<0)), S3C_USBOTG_RSTCON);
+
+	mdelay(1);
+
+	__raw_writel((__raw_readl(S3C_UDC_OTG_GUSBCFG)
+		|(0x3<<8)), S3C_UDC_OTG_GUSBCFG);
+
+	//smb136_set_otg_mode(1);
+
+	printk("otg_host_phy_int : USBPHYCTL=0x%x,PHYPWR=0x%x,PHYCLK=0x%x,USBCFG=0x%x\n",
+		readl(S5P_USB_PHY_CONTROL),
+		readl(S3C_USBOTG_PHYPWR),
+		readl(S3C_USBOTG_PHYCLK),
+		readl(S3C_UDC_OTG_GUSBCFG)
+	);
+}
+EXPORT_SYMBOL(otg_host_phy_init);
 #endif
 
 MACHINE_START(ARIES, "aries")
